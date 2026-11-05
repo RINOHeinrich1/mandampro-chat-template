@@ -17,7 +17,7 @@
     "mode": "web-component",
     "entry": "./src/index.js",
     "element": "onirtech-template-mandampro",
-    "integrity": "sha256-GbMRmyzcn3rcKwoZ0SVWv7PJTERfU2jO44MqRESUpGU=",
+    "integrity": "sha256-e7JQYStOMmCPq+ULH6RZ1HiP+3HQaaOO/m2Wk0yaxLk=",
     "shadowDom": "open"
   },
   "capabilities": [

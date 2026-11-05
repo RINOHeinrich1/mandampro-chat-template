@@ -522,7 +522,7 @@ class MandamProTemplate extends HTMLElement {
     const email = el("input", { type: "email", name: "email", required: "true", placeholder: "vous@exemple.mg" });
     const consent = el("input", { type: "checkbox", name: "consentement" });
     return el("div", { class: "identity" }, [
-      el("h2", { text: "MandamPro" }),
+      el("h2", { text: paramText(ctx, "chat_title", "MandamPro") }),
       el("p", { text: "Quelques informations suffisent pour démarrer la conversation." }),
       el("form", {
         onsubmit: (event) => {
