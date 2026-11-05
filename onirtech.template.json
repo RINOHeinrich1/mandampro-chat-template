@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "kind": "template",
+  "id": "mandampro",
+  "name": "MandamPro",
+  "description": "Template public MandamPro — conversation inspirée de ChatGPT, rendu des blocs de recherche et des médias.",
+  "version": "1.0.0",
+  "publisher": {
+    "id": "onirtech",
+    "name": "ONIRTECH",
+    "trustLevel": "official"
+  },
+  "compatibility": {
+    "hostProtocol": "onirtech.template-host.v1"
+  },
+  "ui": {
+    "mode": "web-component",
+    "entry": "./src/index.js",
+    "element": "onirtech-template-mandampro",
+    "integrity": "sha256-oYFbr5J+ozQvv55drDqwKckhsCFIC8j1rEJhTm/ncdQ=",
+    "shadowDom": "open"
+  },
+  "capabilities": [
+    "messages",
+    "media",
+    "theme",
+    "modelForm",
+    "fallback"
+  ],
+  "network": [],
+  "params": [
+    {
+      "key": "chat_title",
+      "label": "Titre du chatbot",
+      "description": "Nom affiché en haut de la conversation.",
+      "type": "string",
+      "default": "MandamPro",
+      "maxLength": 80
+    },
+    {
+      "key": "welcome_title",
+      "label": "Titre de bienvenue",
+      "description": "Titre affiché au démarrage de la conversation.",
+      "type": "string",
+      "default": "Comment puis-je vous aider ?",
+      "maxLength": 80
+    },
+    {
+      "key": "welcome_message",
+      "label": "Message de bienvenue",
+      "description": "Texte affiché sous le titre de bienvenue.",
+      "type": "text",
+      "default": "Posez votre question, je vous réponds directement ici.",
+      "maxLength": 300
+    },
+    {
+      "key": "primary_color",
+      "label": "Couleur principale",
+      "description": "Bouton d'envoi et accents forts.",
+      "type": "color",
+      "default": "#0f172a"
+    },
+    {
+      "key": "accent_color",
+      "label": "Couleur d'accent",
+      "description": "Liens, focus et petits accents.",
+      "type": "color",
+      "default": "#10a37f"
+    },
+    {
+      "key": "background_color",
+      "label": "Fond de la conversation",
+      "description": "Fond général de la page.",
+      "type": "color",
+      "default": "#ffffff"
+    },
+    {
+      "key": "surface_color",
+      "label": "Surface",
+      "description": "Composeur et cartes de résultats.",
+      "type": "color",
+      "default": "#ffffff"
+    },
+    {
+      "key": "text_color",
+      "label": "Couleur du texte",
+      "description": "Texte principal des messages et des champs.",
+      "type": "color",
+      "default": "#0f172a"
+    },
+    {
+      "key": "muted_color",
+      "label": "Texte secondaire",
+      "description": "Horodatages, aides et libellés discrets.",
+      "type": "color",
+      "default": "#6b7280"
+    },
+    {
+      "key": "border_color",
+      "label": "Bordures",
+      "description": "Séparateurs et bordures du composeur.",
+      "type": "color",
+      "default": "#ececec"
+    }
+  ]
+}

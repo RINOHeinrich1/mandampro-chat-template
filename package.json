@@ -1,0 +1,16 @@
+{
+  "name": "mandampro-chat-template",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Template visuel MandamPro — UI-only, contrat onirtech.template-host.v1.",
+  "scripts": {
+    "dev": "node harness/host.mjs --dir .",
+    "test": "node --test tests/*.test.mjs",
+    "validate": "node tools/onirtech-template.mjs validate .",
+    "pack": "node tools/onirtech-template.mjs pack ."
+  },
+  "devDependencies": {
+    "fflate": "^0.8.3"
+  }
+}

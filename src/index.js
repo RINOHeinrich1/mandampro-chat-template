@@ -1,0 +1,763 @@
+// Template MandamPro — Web Component respectant le contrat
+// `onirtech.template-host.v1`. Aucune dépendance : DOM natif + Shadow DOM.
+// Le template NE PARLE PAS à l'API : il lit `ctx` et appelle `ctx.actions.*`.
+
+import {
+  formatToolFieldValue,
+  renderFallbackText,
+  resolveBlock,
+} from "./blocks.js";
+
+const ELEMENT = "onirtech-template-mandampro";
+
+function paramText(ctx, key, fallback) {
+  const value = ctx.params?.[key];
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : fallback;
+}
+
+function safeColor(value, fallback) {
+  if (typeof value !== "string") return fallback;
+  return /^#[0-9a-f]{6}$/i.test(value.trim()) ? value.trim() : fallback;
+}
+
+function paramColor(ctx, key, themeKey, fallback) {
+  return safeColor(ctx.params?.[key], safeColor(ctx.theme?.[themeKey], fallback));
+}
+
+function el(tag, props = {}, children = []) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(props)) {
+    if (key === "class") node.className = value;
+    else if (key === "html") node.innerHTML = value;
+    else if (key === "text") node.textContent = value;
+    else if (key.startsWith("on") && typeof value === "function") {
+      node.addEventListener(key.slice(2).toLowerCase(), value);
+    } else if (value !== null && value !== undefined) {
+      node.setAttribute(key, String(value));
+    }
+  }
+  for (const child of [].concat(children)) {
+    if (child === null || child === undefined || child === false) continue;
+    node.appendChild(
+      typeof child === "string" || typeof child === "number"
+        ? document.createTextNode(String(child))
+        : child,
+    );
+  }
+  return node;
+}
+
+function appendInline(parent, text) {
+  const pattern = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|\*\*([^*]+)\*\*|`([^`]+)`|\*([^*]+)\*/g;
+  let last = 0;
+  for (const match of text.matchAll(pattern)) {
+    if (match.index > last) parent.appendChild(document.createTextNode(text.slice(last, match.index)));
+    if (match[1] !== undefined && match[2] !== undefined) {
+      parent.appendChild(
+        el("a", { href: match[2], target: "_blank", rel: "noopener noreferrer", text: match[1] }),
+      );
+    } else if (match[3] !== undefined) {
+      parent.appendChild(el("strong", { text: match[3] }));
+    } else if (match[4] !== undefined) {
+      parent.appendChild(el("code", { text: match[4] }));
+    } else if (match[5] !== undefined) {
+      parent.appendChild(el("em", { text: match[5] }));
+    }
+    last = match.index + match[0].length;
+  }
+  if (last < text.length) parent.appendChild(document.createTextNode(text.slice(last)));
+}
+
+/** URL sûre : http(s) ou chemin relatif interne uniquement. */
+function safeUrl(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (trimmed === "") return null;
+  if (/^https?:\/\//i.test(trimmed) || trimmed.startsWith("/")) return trimmed;
+  return null;
+}
+
+/** Rendu générique des blocs, par type de champ — jamais par `ficheKey`. */
+function renderToolSearchResult(container, block) {
+  if (!Array.isArray(block.items) || block.items.length === 0) return 0;
+  const section = el("section", { class: "tool-results" });
+  for (const item of block.items) {
+    const card = el("div", { class: "tool-result" });
+    for (const field of item.fields) {
+      if (field.type === "image") {
+        const url = safeUrl(field.value);
+        if (url !== null) {
+          card.appendChild(el("img", { class: "tool-image", src: url, alt: field.label }));
+        }
+        continue;
+      }
+      const row = el("div", { class: "tool-field" });
+      row.appendChild(el("span", { class: "tool-label", text: field.label }));
+      if (field.type === "url" || field.type === "email") {
+        const href =
+          field.type === "email" && typeof field.value === "string"
+            ? `mailto:${field.value}`
+            : safeUrl(field.value);
+        row.appendChild(
+          href === null || href === undefined
+            ? el("span", { class: "tool-value", text: formatToolFieldValue(field) })
+            : el("a", {
+                class: "tool-value",
+                href,
+                target: "_blank",
+                rel: "noopener noreferrer",
+                text: formatToolFieldValue(field),
+              }),
+        );
+      } else {
+        row.appendChild(
+          el("span", { class: "tool-value", text: formatToolFieldValue(field) }),
+        );
+      }
+      card.appendChild(row);
+    }
+    if (card.childNodes.length > 0) section.appendChild(card);
+  }
+  if (section.childNodes.length === 0) return 0;
+  container.appendChild(section);
+  return 1;
+}
+
+/**
+ * Affiche les blocs connus. Si aucun bloc exploitable (type ou
+ * `contractVersion` inconnus), retombe sur `content` — sans HTML brut.
+ */
+function appendMessageBlocks(container, message) {
+  const blocks = Array.isArray(message.blocks) ? message.blocks : [];
+  let rendered = 0;
+  for (const block of blocks) {
+    const resolved = resolveBlock(block);
+    if (resolved === null) continue;
+    if (resolved.type === "text") {
+      renderMarkdown(container, resolved.text);
+      rendered += 1;
+      continue;
+    }
+    if (resolved.type === "image") {
+      const url = safeUrl(resolved.url);
+      if (url === null) continue;
+      container.appendChild(el("img", { class: "block-image", src: url, alt: resolved.alt ?? "" }));
+      rendered += 1;
+      continue;
+    }
+    if (resolved.type === "tool_search_result") {
+      rendered += renderToolSearchResult(container, resolved);
+    }
+  }
+  if (rendered === 0) {
+    renderMarkdown(container, renderFallbackText(blocks, message.content));
+  }
+}
+
+function renderMarkdown(target, content) {
+  const root = el("div", { class: "md" });
+  const lines = String(content ?? "").replace(/\r\n?/g, "\n").split("\n");
+  let paragraph = [];
+  let list = null;
+  let listTag = null;
+  let code = null;
+
+  const flushParagraph = () => {
+    if (paragraph.length === 0) return;
+    const block = el("p");
+    paragraph.forEach((line, index) => {
+      if (index > 0) block.appendChild(el("br"));
+      appendInline(block, line);
+    });
+    root.appendChild(block);
+    paragraph = [];
+  };
+  const flushList = () => {
+    if (list !== null) root.appendChild(list);
+    list = null;
+    listTag = null;
+  };
+  const openList = (tag) => {
+    if (list !== null && listTag === tag) return;
+    flushList();
+    list = el(tag);
+    listTag = tag;
+  };
+
+  for (const source of lines) {
+    const line = source.replace(/\s+$/, "");
+    if (code !== null) {
+      if (/^```/.test(line)) {
+        root.appendChild(el("pre", {}, [el("code", { text: code.join("\n") })]));
+        code = null;
+      } else {
+        code.push(source);
+      }
+      continue;
+    }
+    if (/^```/.test(line)) {
+      flushParagraph();
+      flushList();
+      code = [];
+      continue;
+    }
+    if (line.trim() === "") {
+      flushParagraph();
+      flushList();
+      continue;
+    }
+    const heading = /^(#{1,3})\s+(.*)$/.exec(line);
+    if (heading !== null) {
+      flushParagraph();
+      flushList();
+      const block = el("div", { class: `md-h md-h${heading[1].length}` });
+      appendInline(block, heading[2]);
+      root.appendChild(block);
+      continue;
+    }
+    if (/^(-{3,}|\*{3,})$/.test(line.trim())) {
+      flushParagraph();
+      flushList();
+      root.appendChild(el("hr"));
+      continue;
+    }
+    const unordered = /^\s*[-*]\s+(.*)$/.exec(line);
+    if (unordered !== null) {
+      flushParagraph();
+      openList("ul");
+      const item = el("li");
+      appendInline(item, unordered[1]);
+      list.appendChild(item);
+      continue;
+    }
+    const ordered = /^\s*\d+\.\s+(.*)$/.exec(line);
+    if (ordered !== null) {
+      flushParagraph();
+      openList("ol");
+      const item = el("li");
+      appendInline(item, ordered[1]);
+      list.appendChild(item);
+      continue;
+    }
+    const quote = /^>\s?(.*)$/.exec(line);
+    if (quote !== null) {
+      flushParagraph();
+      flushList();
+      const block = el("blockquote");
+      appendInline(block, quote[1]);
+      root.appendChild(block);
+      continue;
+    }
+    flushList();
+    paragraph.push(line);
+  }
+  if (code !== null) root.appendChild(el("pre", {}, [el("code", { text: code.join("\n") })]));
+  flushParagraph();
+  flushList();
+  target.appendChild(root);
+}
+
+class MandamProTemplate extends HTMLElement {
+  #root;
+  #ctx;
+  #collectionOpen = false;
+
+  constructor() {
+    super();
+    this.#root = this.attachShadow({ mode: "open" });
+  }
+
+  set onirtechContext(ctx) {
+    this.#ctx = ctx;
+    this.#render();
+  }
+
+  get onirtechContext() {
+    return this.#ctx;
+  }
+
+  connectedCallback() {
+    this.#render();
+  }
+
+  #render() {
+    const ctx = this.#ctx;
+    if (!ctx) {
+      this.#root.replaceChildren(el("p", { class: "loading", text: "Chargement…" }));
+      return;
+    }
+
+    const primary = paramColor(ctx, "primary_color", "primary", "#0f172a");
+    const accent = paramColor(ctx, "accent_color", "accent", "#10a37f");
+    const background = paramColor(ctx, "background_color", "background", "#ffffff");
+    const surface = paramColor(ctx, "surface_color", "surface", "#ffffff");
+    const ink = paramColor(ctx, "text_color", "text", "#0f172a");
+    const muted = paramColor(ctx, "muted_color", "muted", "#6b7280");
+    const border = paramColor(ctx, "border_color", "border", "#ececec");
+
+    const style = el("style", {
+      text: `
+        :host {
+          display: block;
+          font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+          color: ${ink};
+          --page-primary: ${primary};
+          --page-accent: ${accent};
+          --page-bg: ${background};
+          --page-surface: ${surface};
+          --page-ink: ${ink};
+          --page-muted: ${muted};
+          --page-border: ${border};
+        }
+        *, *::before, *::after { box-sizing: border-box; }
+        button, input, textarea { font: inherit; }
+        button { -webkit-tap-highlight-color: transparent; }
+        [hidden] { display: none !important; }
+        .page {
+          width: 100%;
+          height: 100dvh;
+          margin: 0;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          border: 0;
+          border-radius: 0;
+          background: var(--page-bg);
+          box-shadow: none;
+        }
+        .head {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 14px max(16px, calc((100% - 760px) / 2));
+          color: var(--page-ink);
+          background: var(--page-surface);
+          border-bottom: 1px solid var(--page-border);
+        }
+        .avatar {
+          flex: none;
+          width: 34px;
+          height: 34px;
+          border-radius: 50%;
+          display: grid;
+          place-items: center;
+          overflow: hidden;
+          background: color-mix(in srgb, var(--page-accent) 15%, transparent);
+          border: 1px solid color-mix(in srgb, var(--page-accent) 28%, transparent);
+          color: var(--page-accent);
+          font-size: 14px;
+          font-weight: 800;
+        }
+        .avatar img { width: 100%; height: 100%; object-fit: cover; }
+        .head-copy { flex: 1; min-width: 0; }
+        .head-copy h1 {
+          margin: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          font-size: 15px;
+          font-weight: 750;
+        }
+        .status { display: flex; align-items: center; gap: 6px; margin-top: 3px; color: var(--page-muted); font-size: 11px; }
+        .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #4ade80; }
+        .status-dot.done { background: #fbbf24; }
+        .finish {
+          flex: none;
+          height: 32px;
+          padding: 0 12px;
+          border: 1px solid var(--page-border);
+          border-radius: 999px;
+          background: transparent;
+          color: var(--page-ink);
+          font-size: 10px;
+          font-weight: 750;
+          letter-spacing: .08em;
+          text-transform: uppercase;
+          cursor: pointer;
+        }
+        .finish:hover:not(:disabled) { background: color-mix(in srgb, var(--page-ink) 6%, transparent); }
+        .finish:disabled { opacity: .45; cursor: not-allowed; }
+        .body { display: flex; flex: 1; min-height: 0; flex-direction: column; }
+        .log {
+          flex: 1;
+          min-height: 0;
+          overflow-y: auto;
+          overscroll-behavior: contain;
+          padding: 24px max(16px, calc((100% - 760px) / 2));
+          background: var(--page-bg);
+          scrollbar-gutter: stable;
+        }
+        .intro { max-width: 760px; margin: 0 auto 28px; padding: 0; border: 0; background: transparent; }
+        .intro strong { display: block; margin-bottom: 6px; font-size: 22px; letter-spacing: -.03em; }
+        .intro span { color: var(--page-muted); font-size: 14px; line-height: 1.55; }
+        .messages { list-style: none; display: flex; flex-direction: column; gap: 18px; width: min(760px, 100%); margin: 0 auto; padding: 0; }
+        .message { display: flex; gap: 9px; align-items: flex-start; }
+        .message.user { flex-direction: row-reverse; }
+        .bubble {
+          max-width: min(100%, 680px);
+          padding: 8px 0;
+          border: 0;
+          border-radius: 0;
+          background: transparent;
+          color: var(--page-ink);
+          font-size: 14px;
+          line-height: 1.7;
+          white-space: pre-wrap;
+          overflow-wrap: anywhere;
+        }
+        .message.user .bubble { max-width: min(85%, 620px); padding: 10px 14px; border-radius: 18px; background: color-mix(in srgb, var(--page-ink) 6%, var(--page-surface)); color: var(--page-ink); }
+        .message.operator .bubble { padding: 10px 14px; border-radius: 16px; background: color-mix(in srgb, var(--page-accent) 8%, var(--page-surface)); }
+        .msg-author { margin-bottom: 4px; color: #0f766e; font-size: 9px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+        .bubble .md { white-space: normal; }
+        .bubble .md > :first-child { margin-top: 0; }
+        .bubble .md > :last-child { margin-bottom: 0; }
+        .bubble .md p { margin: 0 0 .55em; }
+        .bubble .md ul, .bubble .md ol { margin: .35em 0 .6em; padding-left: 1.25em; }
+        .bubble .md li { margin: .18em 0; }
+        .bubble .md .md-h { margin: .7em 0 .3em; font-weight: 800; line-height: 1.25; }
+        .bubble .md .md-h1 { font-size: 1.15em; }
+        .bubble .md .md-h2 { font-size: 1.05em; }
+        .bubble .md .md-h3 { font-size: 1em; }
+        .bubble .md code { padding: .12em .32em; border-radius: 4px; background: color-mix(in srgb, currentColor 10%, transparent); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .9em; }
+        .bubble .md pre { overflow-x: auto; margin: .5em 0; padding: .65em .75em; border-radius: 8px; background: color-mix(in srgb, currentColor 9%, transparent); }
+        .bubble .md pre code { padding: 0; background: transparent; }
+        .bubble .md blockquote { margin: .5em 0; padding-left: .8em; border-left: 3px solid color-mix(in srgb, currentColor 30%, transparent); opacity: .9; }
+        .bubble .md hr { border: 0; border-top: 1px solid color-mix(in srgb, currentColor 22%, transparent); margin: .7em 0; }
+        .bubble .md a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+        .media { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+        .media img { max-width: 220px; border-radius: 9px; display: block; }
+        .media a { color: var(--page-primary); font-size: 12px; }
+        .typing { margin: 14px 0 0; color: var(--page-muted); font-size: 12px; }
+        .fallback {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          margin: 16px 0 0;
+          padding: 14px;
+          border: 1px dashed var(--page-border);
+          border-radius: 14px;
+          background: var(--page-surface);
+        }
+        .fallback-intro { margin: 0; font-size: 12.5px; font-weight: 700; line-height: 1.45; }
+        .fallback-options { display: flex; flex-direction: column; gap: 6px; }
+        .fallback-option, .fallback-form {
+          padding: 9px 11px;
+          border: 1px solid var(--page-border);
+          border-radius: 10px;
+          background: var(--page-bg);
+          color: var(--page-primary);
+          font-size: 12px;
+          font-weight: 650;
+          text-align: left;
+          cursor: pointer;
+        }
+        .fallback-option:hover, .fallback-form:hover { border-color: var(--page-primary); }
+        .fallback-form { text-align: center; }
+        .composer { padding: 10px max(16px, calc((100% - 760px) / 2)) 18px; border-top: 0; background: var(--page-bg); }
+        .composer-box { display: flex; align-items: flex-end; gap: 8px; width: min(760px, 100%); margin: 0 auto; padding: 10px 10px 10px 16px; border: 1px solid var(--page-border); border-radius: 28px; background: var(--page-surface); box-shadow: 0 4px 18px color-mix(in srgb, var(--page-ink) 8%, transparent); }
+        .composer-box:focus-within { border-color: color-mix(in srgb, var(--page-ink) 30%, var(--page-border)); box-shadow: 0 4px 22px color-mix(in srgb, var(--page-ink) 12%, transparent); }
+        .composer textarea { flex: 1; min-height: 28px; max-height: 160px; padding: 4px 0; border: 0; outline: 0; resize: none; background: transparent; color: var(--page-ink); font-size: 14px; line-height: 1.5; }
+        .send { flex: none; width: 34px; height: 34px; border: 0; border-radius: 50%; background: var(--page-primary); color: #fff; font-size: 15px; cursor: pointer; }
+        .hint { width: min(760px, 100%); margin: 8px auto 0; color: var(--page-muted); font-size: 10px; text-align: center; }
+        .done { padding: 12px 16px; border-top: 1px solid #bbf7d0; background: #f0fdf4; color: #166534; font-size: 12px; font-weight: 650; }
+        .identity { flex: 1; min-height: 0; overflow-y: auto; padding: 22px; }
+        .identity h2 { margin: 0 0 5px; color: var(--page-primary); font-size: 18px; }
+        .identity p { margin: 0 0 16px; color: var(--page-muted); font-size: 13px; line-height: 1.5; }
+        .identity form { display: flex; flex-direction: column; gap: 12px; }
+        .identity label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; font-weight: 650; }
+        .identity input[type="text"], .identity input[type="email"] { padding: 10px 11px; border: 1px solid var(--page-border); border-radius: 10px; background: var(--page-surface); color: var(--page-ink); }
+        .identity .check { flex-direction: row; align-items: flex-start; gap: 8px; font-weight: 400; line-height: 1.45; }
+        .identity button[type="submit"] { padding: 11px; border: 0; border-radius: 10px; background: var(--page-primary); color: #fff; font-weight: 700; cursor: pointer; }
+        .identity a { color: var(--page-primary); }
+        .collection { margin-top: 16px; padding: 16px; border: 1px solid var(--page-border); border-radius: 14px; background: var(--page-surface); }
+        .collection h3 { margin: 0 0 12px; color: var(--page-primary); font-size: 14px; }
+        .collection form { display: flex; flex-direction: column; gap: 10px; }
+        .collection label { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; font-weight: 650; }
+        .collection input, .collection textarea, .collection select { padding: 9px 10px; border: 1px solid var(--page-border); border-radius: 9px; background: var(--page-surface); color: var(--page-ink); font-size: 12.5px; }
+        .collection textarea { min-height: 72px; resize: vertical; }
+        .collection-actions { display: flex; gap: 8px; margin-top: 4px; }
+        .collection-actions button { flex: 1; padding: 10px; border: 1px solid var(--page-border); border-radius: 9px; background: var(--page-bg); color: var(--page-ink); cursor: pointer; }
+        .collection-actions button[type="submit"] { border-color: var(--page-primary); background: var(--page-primary); color: #fff; font-weight: 700; }
+        .loading { padding: 24px; text-align: center; color: #64748b; }
+        @media (max-width: 520px) {
+          .page { width: 100%; height: 100dvh; margin: 0; border-radius: 0; border-left: 0; border-right: 0; }
+          .head { padding: 12px 14px; }
+          .log { padding: 20px 14px; }
+          .intro strong { font-size: 20px; }
+          .messages { gap: 16px; }
+          .composer { padding: 8px 12px 14px; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+        }
+      `,
+    });
+
+    const title = paramText(ctx, "chat_title", ctx.brand.name || "MandamPro");
+    const logo =
+      typeof ctx.brand.logoUrl === "string" && ctx.brand.logoUrl !== ""
+        ? el("img", { src: ctx.brand.logoUrl, alt: "" })
+        : el("span", { text: (ctx.brand.name || "A").slice(0, 1).toUpperCase() });
+    const finalised = ctx.state.status === "finalisee";
+    const header = el("header", { class: "head" }, [
+      el("div", { class: "avatar" }, [logo]),
+      el("div", { class: "head-copy" }, [
+        el("h1", { text: title }),
+        el("span", { class: "status" }, [
+          el("span", { class: `status-dot${finalised ? " done" : ""}` }),
+          el("span", { text: finalised ? "Demande enregistrée" : "Assistant en ligne" }),
+        ]),
+      ]),
+    ]);
+
+    const content =
+      ctx.state.phase === "identity"
+        ? this.#identityForm(ctx)
+        : this.#chat(ctx, finalised, header);
+    this.#root.replaceChildren(style, el("main", { class: "page" }, [header, content]));
+  }
+
+  #identityForm(ctx) {
+    const nom = el("input", { type: "text", name: "nom", required: "true", placeholder: "Votre nom" });
+    const email = el("input", { type: "email", name: "email", required: "true", placeholder: "vous@exemple.mg" });
+    const consent = el("input", { type: "checkbox", name: "consentement" });
+    return el("div", { class: "identity" }, [
+      el("h2", { text: "MandamPro" }),
+      el("p", { text: "Quelques informations suffisent pour démarrer la conversation." }),
+      el("form", {
+        onsubmit: (event) => {
+          event.preventDefault();
+          if (!nom.value.trim() || !email.value.trim()) return;
+          ctx.actions.submitIdentity({
+            nom: nom.value.trim(),
+            email: email.value.trim(),
+            consentement: consent.checked,
+          });
+        },
+      }, [
+        el("label", {}, ["Nom", nom]),
+        el("label", {}, ["Email", email]),
+        ctx.consent
+          ? el("label", { class: "check" }, [
+              consent,
+              el("span", {}, [
+                el("span", { text: ctx.consent.texte }),
+                ctx.consent.lien
+                  ? el("a", { href: ctx.consent.lien, target: "_blank", rel: "noopener", text: " Politique de confidentialité" })
+                  : null,
+              ]),
+            ])
+          : null,
+        el("button", { type: "submit", text: "Démarrer la discussion" }),
+      ]),
+    ]);
+  }
+
+  #chat(ctx, finalised, header) {
+    const items = ctx.state.messages.map((message) => {
+      const media = (message.medias ?? []).map((m) =>
+        m.type === "photo"
+          ? el("img", { src: m.url, alt: m.libelle })
+          : el("a", { href: m.url, target: "_blank", rel: "noopener", text: m.libelle }),
+      );
+      const author =
+        typeof message.authorName === "string"
+          ? el("div", { class: "msg-author", text: message.authorName })
+          : null;
+      const content = el("div", { class: "bubble-content" });
+      if (message.role === "user") {
+        content.textContent = message.content;
+      } else {
+        appendMessageBlocks(content, message);
+      }
+      const bubble = el("div", { class: "bubble" }, [
+        ...(author === null ? [] : [author]),
+        content,
+        media.length > 0 ? el("div", { class: "media" }, media) : null,
+      ]);
+      return el("li", { class: `message ${message.role}${author === null ? "" : " operator"}` }, [bubble]);
+    });
+
+    const welcomeTitle = paramText(ctx, "welcome_title", "Comment puis-je vous aider ?");
+    const welcomeMessage = paramText(
+      ctx,
+      "welcome_message",
+      "Posez votre question, je vous réponds directement ici.",
+    );
+    const intro = el("div", { class: "intro" }, [
+      el("div", {}, [
+        el("strong", { text: welcomeTitle }),
+        el("span", { text: welcomeMessage }),
+      ]),
+    ]);
+
+    const fallback = ctx.state.fallback;
+    const modelForm = Array.isArray(ctx.resources.modelForm) ? ctx.resources.modelForm : [];
+    const hasCollection = modelForm.length > 0;
+    const collectionOpen = this.#collectionOpen && hasCollection;
+    const fallbackView = fallback && !collectionOpen
+      ? el("section", { class: "fallback", "aria-live": "polite" }, [
+          el("p", { class: "fallback-intro", text: fallback.intro }),
+          el("div", { class: "fallback-options" }, fallback.questions.map((question) =>
+            el("button", {
+              type: "button",
+              class: "fallback-option",
+              text: question.label,
+              onclick: () => ctx.actions.selectFallback(question.id),
+            }),
+          )),
+          fallback.showCollectionForm && hasCollection
+            ? el("button", {
+                type: "button",
+                class: "fallback-form",
+                text: "Remplir le formulaire",
+                onclick: () => {
+                  this.#collectionOpen = true;
+                  ctx.actions.openCollectionForm();
+                  this.#render();
+                },
+              })
+            : null,
+        ])
+      : null;
+
+    const textarea = el("textarea", {
+      rows: "1",
+      maxlength: "4000",
+      placeholder: "Écrivez votre message…",
+      "aria-label": "Votre message",
+    });
+    const sendMessage = () => {
+      const content = textarea.value.trim();
+      if (content === "") return;
+      ctx.actions.sendMessage(content);
+      textarea.value = "";
+      textarea.style.height = "";
+    };
+    textarea.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+        event.preventDefault();
+        sendMessage();
+      }
+    });
+    textarea.addEventListener("input", () => {
+      textarea.style.height = "auto";
+      textarea.style.height = `${Math.min(textarea.scrollHeight, 110)}px`;
+    });
+
+    const composer = el("div", { class: "composer" }, [
+      el("div", { class: "composer-box" }, [
+        textarea,
+        el("button", {
+          type: "button",
+          class: "send",
+          "aria-label": "Envoyer",
+          text: "➤",
+          onclick: sendMessage,
+        }),
+      ]),
+    ]);
+
+    const collectionForm = collectionOpen ? this.#collectionForm(ctx, modelForm) : null;
+    const finish =
+      hasCollection && !fallback && !collectionOpen && !finalised && ctx.state.messages.length > 0
+        ? el("button", {
+            type: "button",
+            class: "finish",
+            text: "Terminer",
+            onclick: () => ctx.actions.finish(),
+          })
+        : null;
+    headerAction(header, finish);
+
+    const log = el("div", { class: "log", role: "log", "aria-live": "polite" }, [
+      intro,
+      el("ul", { class: "messages" }, items),
+      ctx.state.typing ? el("p", { class: "typing", text: "L’assistant écrit…" }) : null,
+      fallbackView,
+      collectionForm,
+    ]);
+
+    const body = el("div", { class: "body" }, [
+      log,
+      finalised
+        ? el("p", { class: "done", text: "Votre demande a bien été enregistrée." })
+        : fallback === undefined && !collectionOpen
+          ? composer
+          : null,
+    ]);
+    queueMicrotask(() => {
+      log.scrollTop = log.scrollHeight;
+      if (fallback === undefined) textarea.focus();
+    });
+    return body;
+  }
+
+  #collectionForm(ctx, fields) {
+    const values = {};
+    const controls = [];
+    for (const field of fields) {
+      if (field.type === "file") continue;
+      let control;
+      if (field.type === "textarea") {
+        control = el("textarea", { name: field.name, maxlength: "4000" });
+      } else if (field.type === "select" && Array.isArray(field.options)) {
+        control = el("select", { name: field.name }, [
+          el("option", { value: "", text: "Choisir…" }),
+          ...field.options.map((option) => el("option", { value: option, text: option })),
+        ]);
+      } else {
+        control = el("input", {
+          type: field.type === "email" ? "email" : field.type === "url" ? "url" : "text",
+          name: field.name,
+          maxlength: "4000",
+        });
+      }
+      controls.push(
+        el("label", {}, [
+          `${field.label}${field.required ? " *" : ""}`,
+          control,
+        ]),
+      );
+    }
+    return el("section", { class: "collection" }, [
+      el("h3", { text: "Compléter la fiche" }),
+      el("form", {
+        onsubmit: async (event) => {
+          event.preventDefault();
+          const form = event.currentTarget;
+          for (const field of fields) {
+            if (field.type === "file") continue;
+            const control = form.elements.namedItem(field.name);
+            values[field.name] = control !== null && "value" in control ? control.value : "";
+          }
+          await ctx.actions.submitCollection(values);
+          this.#collectionOpen = false;
+          this.#render();
+        },
+      }, [
+        ...controls,
+        el("div", { class: "collection-actions" }, [
+          el("button", {
+            type: "button",
+            text: "Annuler",
+            onclick: () => {
+              this.#collectionOpen = false;
+              this.#render();
+            },
+          }),
+          el("button", { type: "submit", text: "Enregistrer" }),
+        ]),
+      ]),
+    ]);
+  }
+}
+
+/** Ajoute l'action Terminer dans l'en-tête après construction. */
+function headerAction(header, finish) {
+  if (finish === null) return;
+  const copy = header.querySelector(".head-copy");
+  if (copy !== null) copy.after(finish);
+}
+
+if (!customElements.get(ELEMENT)) customElements.define(ELEMENT, MandamProTemplate);
