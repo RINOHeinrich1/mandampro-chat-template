@@ -1,6 +1,6 @@
 {
   "name": "mandampro-chat-template",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "description": "Template visuel MandamPro — UI-only, contrat onirtech.template-host.v1.",

@@ -460,7 +460,14 @@ class MandamProTemplate extends HTMLElement {
         .send { flex: none; width: 34px; height: 34px; border: 0; border-radius: 50%; background: var(--page-primary); color: #fff; font-size: 15px; cursor: pointer; }
         .hint { width: min(760px, 100%); margin: 8px auto 0; color: var(--page-muted); font-size: 10px; text-align: center; }
         .done { padding: 12px 16px; border-top: 1px solid #bbf7d0; background: #f0fdf4; color: #166534; font-size: 12px; font-weight: 650; }
-        .identity { flex: 1; min-height: 0; overflow-y: auto; padding: 22px; }
+        .identity {
+          flex: 1;
+          width: min(460px, calc(100% - 32px));
+          min-height: 0;
+          margin: 0 auto;
+          padding: clamp(32px, 12vh, 104px) 0 32px;
+          overflow-y: auto;
+        }
         .identity h2 { margin: 0 0 5px; color: var(--page-primary); font-size: 18px; }
         .identity p { margin: 0 0 16px; color: var(--page-muted); font-size: 13px; line-height: 1.5; }
         .identity form { display: flex; flex-direction: column; gap: 12px; }
